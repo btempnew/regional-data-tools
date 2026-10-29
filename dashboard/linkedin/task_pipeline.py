@@ -242,16 +242,36 @@ def crawl(task, post_time, output, resume=None, minutes=330):
             if scraper.out_of_time(): break
             # A small rewind accommodates shifted results and interrupted details.
             offset = max(0, int(previous.get('next_offset', 0))-scraper.BATCH_SIZE)
-            try:
-                jobs, stats = scraper.scrape_role(task['role'], location, scraper.POST_TIME_MAP.get(post_time),
-                    seen, True, start_offset=offset, on_page=lambda rows, progress: store.checkpoint(location, rows, progress),
-                    stop_on_irrelevant=False)
-                done = bool(stats.get('exhausted') or stats.get('capped')) and not stats.get('blocked')
-                store.checkpoint(location, jobs, {'next_offset': stats.get('next_offset', offset),
-                    'done': done, 'capped': bool(stats.get('capped')), 'reason': stats.get('stop_reason', 'unknown')})
-            except Exception as exc:
-                print(f'::warning::{task["role"]} / {location} paused: {type(exc).__name__}; saved journal retained.')
-                store.checkpoint(location, [], {'done': False, 'reason': type(exc).__name__})
+            rate_limit_retries = 0
+            while not scraper.out_of_time(45):
+                try:
+                    jobs, stats = scraper.scrape_role(task['role'], location, scraper.POST_TIME_MAP.get(post_time),
+                        seen, True, desc_workers=2, start_offset=offset,
+                        on_page=lambda rows, progress: store.checkpoint(location, rows, progress),
+                        stop_on_irrelevant=False)
+                    done = bool(stats.get('exhausted') or stats.get('capped')) and not stats.get('blocked')
+                    next_offset = int(stats.get('next_offset', offset))
+                    store.checkpoint(location, jobs, {'next_offset': next_offset,
+                        'done': done, 'capped': bool(stats.get('capped')),
+                        'reason': stats.get('stop_reason', 'unknown')})
+                    store.snapshot()
+                    if not stats.get('blocked') or not stats.get('hit_429'):
+                        break
+                    # The guest endpoint can return ten cards and then 429.
+                    # Those cards are durable; retry the failed cursor after cooling down.
+                    rate_limit_retries += 1
+                    cooldown = min(45 * 2 ** min(rate_limit_retries - 1, 3), 360)
+                    if scraper.out_of_time(cooldown + 45):
+                        break
+                    print(f'::warning::{task["role"]} / {location}: 429 after {next_offset} results; '
+                          f'cooling down {cooldown}s before retrying the saved cursor.')
+                    time.sleep(cooldown)
+                    offset = next_offset
+                    seen.update(key for key, job in store.jobs.items() if job.get('description'))
+                except Exception as exc:
+                    print(f'::warning::{task["role"]} / {location} paused: {type(exc).__name__}; saved journal retained.')
+                    store.checkpoint(location, [], {'done': False, 'reason': type(exc).__name__})
+                    break
             store.snapshot()
         # Detail failures remain retryable, even if all listing pages finished.
         missing = [job for job in store.jobs.values() if not job.get('description')]

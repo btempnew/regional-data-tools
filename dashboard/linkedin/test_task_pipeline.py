@@ -157,5 +157,25 @@ class PersistenceTests(unittest.TestCase):
         self.assertFalse(restored.state['locations']['United States']['done'])
         self.assertEqual(restored.state['locations']['United States']['next_offset'], 0)
 
+    def test_partial_page_429_retries_saved_cursor_and_retains_both_pages(self):
+        import linkedin_68_roles as scraper
+        task = {'id': 'states-429-0', 'role': 'Senior Buyer', 'kind': 'states',
+                'locations': ['Alabama, United States']}
+        def one_page(role, location, hours_old, seen, fetch_description, **kwargs):
+            if kwargs['start_offset'] == 0:
+                kwargs['on_page']([row(100)], {'next_offset': 10, 'done': False})
+                return [row(100)], {'next_offset': 10, 'blocked': True,
+                                    'hit_429': True, 'stop_reason': 'rate_limited'}
+            self.assertEqual(kwargs['start_offset'], 10)
+            kwargs['on_page']([row(200)], {'next_offset': 20, 'done': False})
+            return [row(200)], {'next_offset': 20, 'exhausted': True}
+        with patch.object(scraper, 'scrape_role', side_effect=one_page), \
+             patch.object(scraper, 'out_of_time', return_value=False), \
+             patch('task_pipeline.time.sleep') as sleep:
+            result = crawl(task, 'week', self.root, minutes=10)
+        self.assertEqual(result, 0)
+        self.assertEqual(set(TaskStore(self.root, task, 'week').jobs), {'linkedin-100', 'linkedin-200'})
+        self.assertEqual(sleep.call_args.args[0], 45)
+
 
 if __name__ == '__main__': unittest.main()

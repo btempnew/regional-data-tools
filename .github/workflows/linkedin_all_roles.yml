@@ -11,6 +11,10 @@ on:
         description: 'Internal continuation progress counter; leave blank'
         type: string
         default: ''
+      previous_saved:
+        description: 'Internal continuation job-count counter; leave blank'
+        type: string
+        default: ''
       continuation_stalls:
         description: 'Internal continuation retry counter; leave blank'
         type: string

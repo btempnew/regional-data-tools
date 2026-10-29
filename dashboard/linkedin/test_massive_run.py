@@ -40,9 +40,11 @@ class MassiveRunTests(unittest.TestCase):
         self.assertIsNone(continuation({'pending_regions': [], 'capped_regions': [{}]}, {}, 1))
         progress = {'pending_regions': [{}]}
         self.assertIsNone(continuation(progress, {'auto_continue': 'false'}, 1))
-        self.assertIsNone(continuation(progress, {'previous_remaining': '1', 'continuation_stalls': '2'}, 1))
+        self.assertIsNone(continuation(progress, {'previous_remaining': '1', 'previous_saved': '0', 'continuation_stalls': '2'}, 1))
         self.assertIsNone(continuation({**progress, 'pipeline_error': True}, {}, 1))
         self.assertEqual(continuation(progress, {'previous_remaining': '2', 'continuation_stalls': '2'}, 1)['continuation_stalls'], '0')
+        self.assertEqual(continuation({**progress, 'unique_postings_saved': 20},
+                                      {'previous_remaining': '1', 'previous_saved': '10', 'continuation_stalls': '2'}, 1)['continuation_stalls'], '0')
 
     def test_manifest_contains_expected_unstarted_regions(self):
         roles = plan(['Sourcing'], 'national')
