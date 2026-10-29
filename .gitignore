@@ -1,0 +1,15 @@
+.env
+.env.*
+!.env.example
+__pycache__/
+*.pyc
+*.csv
+*.xlsx
+*.sqlite*
+*.db
+task_results/
+resume_task/
+scraped_data/
+*.log
+.linkedin*state.json
+*.tmp

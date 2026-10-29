@@ -1,0 +1,403 @@
+name: LinkedIn Roles 1-23
+
+# Shared implementation; the other two workflow entries call this file.
+env:
+  ROLE_START: ${{ inputs.role_start || 1 }}
+  ROLE_END: ${{ inputs.role_end || 23 }}
+
+permissions:
+  contents: read
+  actions: write
+
+on:
+  workflow_call:
+    inputs:
+      role_start:
+        type: number
+        default: 1
+      role_end:
+        type: number
+        default: 23
+      post_time:
+        type: string
+        default: week
+      roles:
+        type: string
+        default: ""
+      search_terms:
+        type: string
+        default: ""
+      state_split_terms:
+        type: string
+        default: ""
+      state_split_mode:
+        type: string
+        default: all
+      resume_run_id:
+        type: string
+        default: ""
+      shards:
+        type: string
+        default: "8"
+    secrets:
+      LINKEDIN_LI_AT:
+        required: false
+      SCRAPER_REPO:
+        required: false
+      SCRAPER_PAT:
+        required: false
+  workflow_dispatch:
+    inputs:
+      auto_continue:
+        description: 'Automatically resume unfinished states/JDs; pauses after three attempts without progress'
+        type: boolean
+        default: true
+      previous_remaining:
+        description: 'Internal continuation progress counter; leave blank'
+        type: string
+        default: ''
+      continuation_stalls:
+        description: 'Internal continuation retry counter; leave blank'
+        type: string
+        default: ''
+      resume_run_id:
+        description: "Continue an earlier run ID; keeps its jobs and resumes available checkpoints"
+        required: false
+        default: ""
+        type: string
+      state_split_mode:
+        description: "auto: split capped nationwide searches by US state; all: always search every US state"
+        required: false
+        default: all
+        type: choice
+        options: [all, auto]
+      post_time:
+        description: "How far back to look for jobs"
+        required: false
+        default: "week"
+        type: choice
+        options: [day, week, 3week, month, any]
+      roles:
+        description: "Comma-separated filters within this role range; blank runs the whole range."
+        required: false
+        default: "Senior Commodity Manager, Commodity Manager, Commodity Buyer, Commodity Lead, Purchasing Commodity Manager, Senior Commodity Buyer, Global Supply Chain Analyst, Global Supply Chain Specialist, Global Supply Chain Lead, Global Sourcing Specialist, Global Commodity Manager, Global Supply Chain Manager, Commodity Specialist, Procurement Manager, Procurement Specialist, Senior Procurement Specialist, Senior Procurement Manager, Assistant Procurement Manager, Procurement Associate, Senior Procurement Analyst, Senior Procurement Officer, Senior Procurement Engineer, Senior Procurement Consultant"
+        type: string
+      shards:
+        description: "Maximum simultaneous task runners"
+        required: false
+        default: "8"
+        type: choice
+        options: ["4", "8", "12", "16"]
+
+jobs:
+  prepare:
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.plan.outputs.matrix }}
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.11'
+      - name: Plan selected roles (start directly with every state)
+        id: plan
+        env:
+          ROLE_FILTER: ${{ inputs.roles }}
+          SEARCH_TERMS: ${{ inputs.search_terms }}
+        run: |
+          python3 dashboard/linkedin/task_pipeline.py plan --phase national \
+            --role-start "$ROLE_START" --role-end "$ROLE_END" --roles "$ROLE_FILTER" --search-terms "$SEARCH_TERMS"
+
+  scrape:
+    needs: prepare
+    strategy:
+      fail-fast: false
+      max-parallel: 2
+      matrix: ${{ fromJSON(needs.prepare.outputs.matrix) }}
+    name: Regions / ${{ matrix.role }}
+    uses: ./.github/workflows/linkedin_role_regions.yml
+    with:
+      role: ${{ matrix.role }}
+      post_time: ${{ inputs.post_time || 'week' }}
+      resume_run_id: ${{ inputs.resume_run_id }}
+      parallelism: ${{ inputs.shards || '8' }}
+
+  # -- Merge shards, enrich JDs, build Excel ----------------------------------
+  deliver:
+    needs: [prepare, scrape]
+    runs-on: ubuntu-latest
+    if: always() && needs.prepare.result == 'success'
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Fetch scraper code (only if this repo has none)
+        run: |
+          if [ -n "${{ secrets.SCRAPER_REPO }}" ] && \
+             ! find . -name "linkedin_68_roles.py" -not -path "./.git/*" | grep -q .; then
+            git clone "https://${{ secrets.SCRAPER_PAT }}@github.com/${{ secrets.SCRAPER_REPO }}.git" _scrapers
+          fi
+
+      - name: Find scraper root
+        id: root
+        run: |
+          if   find scrapers   -name "linkedin_68_roles.py" 2>/dev/null | grep -q .; then
+            echo "dir=scrapers" >> "$GITHUB_OUTPUT"
+          elif find dashboard  -name "linkedin_68_roles.py" 2>/dev/null | grep -q .; then
+            echo "dir=dashboard" >> "$GITHUB_OUTPUT"
+          elif find _scrapers  -name "linkedin_68_roles.py" 2>/dev/null | grep -q .; then
+            echo "dir=$(dirname $(find _scrapers -name linkedin_68_roles.py | head -1) | sed 's|/linkedin$||')" >> "$GITHUB_OUTPUT"
+          elif find .          -name "linkedin_68_roles.py" -not -path "./.git/*" 2>/dev/null | grep -q .; then
+            echo "dir=$(dirname $(find . -name linkedin_68_roles.py -not -path './.git/*' | head -1) | sed 's|/linkedin$||')" >> "$GITHUB_OUTPUT"
+          else
+            echo "dir=." >> "$GITHUB_OUTPUT"
+          fi
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: pip install --quiet httpx pandas openpyxl
+
+      - name: Set PYTHONPATH for enrichment
+        run: echo "PYTHONPATH=${{ steps.root.outputs.dir }}" >> "$GITHUB_ENV"
+
+      - name: Download current task data and checkpoints
+        uses: actions/download-artifact@v5
+        with:
+          pattern: linkedin-task-*
+          path: scraped_data/current
+          merge-multiple: false
+
+      - name: Restore earlier task artifacts for delivery
+        id: prior_tasks
+        if: inputs.resume_run_id != ''
+        continue-on-error: true
+        uses: actions/download-artifact@v5
+        with:
+          pattern: linkedin-task-*
+          path: scraped_data/previous
+          run-id: ${{ inputs.resume_run_id }}
+          github-token: ${{ github.token }}
+
+      - name: Restore legacy shard artifacts for delivery
+        id: prior_legacy
+        if: inputs.resume_run_id != ''
+        continue-on-error: true
+        uses: actions/download-artifact@v5
+        with:
+          pattern: shard-*
+          path: scraped_data/previous
+          run-id: ${{ inputs.resume_run_id }}
+          github-token: ${{ github.token }}
+
+      - name: Verify resumed data was restored
+        if: inputs.resume_run_id != ''
+        env:
+          TASKS_RESULT: ${{ steps.prior_tasks.outcome }}
+          LEGACY_RESULT: ${{ steps.prior_legacy.outcome }}
+        run: |
+          if ! find scraped_data/previous -type f \( -name '*_jobs.csv' -o -name '*_jobs.jsonl' -o -name '*_state.json' \) -print -quit | grep -q .; then
+            echo '::error::Earlier results could not be restored. Refusing to publish an incomplete replacement.'
+            exit 1
+          fi
+
+      - name: Merge + enrich + Excel
+        id: merge
+        env:
+          ROLE_START: ${{ env.ROLE_START }}
+          ROLE_END:   ${{ env.ROLE_END }}
+          SCRAPER_DIR: ${{ steps.root.outputs.dir }}
+          SEARCH_TERMS: ${{ inputs.search_terms }}
+        run: |
+          python3 - <<'PYEOF'
+          import glob, csv, os, re
+          import pandas as pd
+
+          workspace = os.environ.get('GITHUB_WORKSPACE', os.getcwd())
+          sdir = os.environ['SCRAPER_DIR']
+          os.chdir(os.path.join(workspace, sdir))
+
+          # -- merge shards ----------------------------------------------------
+          import sys
+          sys.path.insert(0, 'linkedin')
+          from task_pipeline import posting_key, merge_record, read_records
+
+          all_jobs = {}
+          job_keys_by_search = {}
+          job_key = posting_key
+          base = os.path.join(workspace, 'scraped_data')
+          print(f'Looking for saved task data in: {base}')
+          files = (glob.glob(f'{base}/**/linkedin_shard_*_jobs.csv', recursive=True)
+                   + glob.glob(f'{base}/**/linkedin_shard_*_jobs.jsonl', recursive=True))
+          # Earlier results first; current journals can add newer detail fields.
+          files.sort(key=lambda path: ('previous' not in path.split(os.sep), path.endswith('.jsonl'), path))
+          for f in files:
+              for j in read_records(f):
+                  key = job_key(j)
+                  query = (j.get('search_role') or '').strip()
+                  if query:
+                      job_keys_by_search.setdefault(query.casefold(), set()).add(key)
+                  previous = all_jobs.get(key)
+                  j = merge_record(previous, j)
+                  if j.get('id') != key:
+                      j['legacy_id'] = j.get('id')
+                  j['id'] = key
+                  all_jobs[key] = j
+
+          os.makedirs('linkedin/linkedin_jobs', exist_ok=True)
+
+          def write_csv(rows, path):
+              if not rows: return
+              with open(path, 'w', newline='', encoding='utf-8') as f:
+                  w = csv.DictWriter(f, fieldnames=list(dict.fromkeys(key for row in rows for key in row)))
+                  w.writeheader(); w.writerows(rows)
+              print(f'  {path}: {len(rows)} rows')
+
+          # -- prefer scraped repost labels; mark ID fallbacks as estimates ---
+          import sys, bisect
+          from datetime import date, datetime, timedelta, timezone as tz
+          sys.path.insert(0, 'db')
+          try:
+              from linkedin_reposts import Calibration, SEED, annotate
+              calibration = Calibration(SEED)
+              all_rows = list(all_jobs.values())
+              reposts = annotate(all_rows, calibration)
+              all_jobs = {job_key(r): r for r in all_rows}
+              explicit = sum(r.get('reposted_confidence') == 'explicit' for r in all_rows)
+              estimated = sum(r.get('reposted_confidence') == 'estimated' for r in all_rows)
+              unknown = sum(r.get('reposted') is None for r in all_rows)
+              print(f'Repost evidence: {explicit} explicit, {estimated} estimated, {unknown} unknown; {reposts} flagged')
+          except Exception as e:
+              print(f'Repost detection skipped: {e}')
+
+          write_csv(list(all_jobs.values()),    'linkedin/linkedin_jobs/linkedin_jobs_all.csv')
+          print(f'Merged: {len(all_jobs)} distinct postings')
+          import shutil
+          shutil.copyfile('linkedin/linkedin_jobs/linkedin_jobs_all.csv', 'linkedin/linkedin_jobs/linkedin_jobs_raw.csv') if all_jobs else None
+
+          # -- enrich merged CSVs with job_extraction --------------------------
+          from pathlib import Path
+          try:
+              from job_extraction.enrich_csv import enrich_csv
+              for csv_path in ['linkedin/linkedin_jobs/linkedin_jobs_all.csv']:
+                  p = Path(csv_path)
+                  if p.exists() and p.stat().st_size > 0:
+                      n = enrich_csv(p, board='LinkedIn')
+                      print(f'  Enriched {n} rows in {csv_path}')
+          except ImportError:
+              print('  job_extraction not available — skipping enrichment')
+
+          # -- build Excel -----------------------------------------------------
+          ILLEGAL = re.compile(r'[\x00-\x08\x0b\x0c\x0e-\x1f]')
+
+          def load(path):
+              return pd.read_csv(path, dtype=str) if os.path.exists(path) else pd.DataFrame()
+
+          def clean(df):
+              for col in list(df.columns):
+                  df[col] = (df[col].fillna('').astype(str)
+                               .str.replace(r'\r\n|\r|\n', ' ', regex=True)
+                               .apply(lambda x: ILLEGAL.sub('', x)))
+                  # Excel truncates cells above 32,767 characters. Keep overflow
+                  # in additional columns; raw CSV remains verbatim.
+                  texts = df[col].copy()
+                  longest = int(texts.str.len().max()) if len(texts) else 0
+                  for part in range(1, (longest + 32766) // 32767):
+                      overflow = f'{col}_part_{part+1}'
+                      while overflow in df.columns:
+                          overflow += '_overflow'
+                      df[overflow] = texts.str.slice(part*32767, (part+1)*32767)
+                  df[col] = texts.str.slice(0, 32767)
+              return df
+
+          def indexed(df):
+              df = df.drop(columns=['Index_No'], errors='ignore').reset_index(drop=True)
+              df.insert(0, 'Index_No', range(1, len(df)+1))
+              return clean(df)
+
+          def excel_sheets(writer, df, name):
+              # Split sheets rather than omit rows when Excel reaches its row limit.
+              for start in range(0, max(len(df), 1), 1048575):
+                  suffix = '' if start == 0 else f'_{start//1048575+1}'
+                  sheet = name[:31-len(suffix)] + suffix
+                  indexed(df.iloc[start:start+1048575].copy()).to_excel(writer, sheet_name=sheet, index=False)
+
+          all_df    = load('linkedin/linkedin_jobs/linkedin_jobs_all.csv')
+          from task_pipeline import literal, HERE
+          from strict_titles import strict_role
+          catalog = literal(HERE/'linkedin_68_roles.py', 'ROLES')
+          title_column = 'job_title' if 'job_title' in all_df else 'title'
+          strict_df = all_df.copy()
+          strict_df['matched_catalog_role'] = strict_df[title_column].map(lambda title: strict_role(title, catalog)) if title_column in strict_df else ''
+          strict_df = strict_df[strict_df['matched_catalog_role'] != '']
+          enriched_by_key = {job_key(row): row for row in all_df.to_dict(orient='records')}
+
+          os.makedirs('deliverables', exist_ok=True)
+          s = os.environ.get('ROLE_START','0')
+          e = os.environ.get('ROLE_END','79')
+          search_terms = [term.strip() for term in os.environ.get('SEARCH_TERMS', '').split(',') if term.strip()]
+          label = "keywords" if search_terms else f"roles_{s}_to_{e}"
+
+          with pd.ExcelWriter(f'deliverables/jobs_{label}.xlsx', engine='openpyxl') as w:
+              excel_sheets(w, all_df, 'All')
+              excel_sheets(w, strict_df, 'Strict_79_Roles')
+              for term in search_terms:
+                  rows = [enriched_by_key[key] for key in job_keys_by_search.get(term.casefold(), set())
+                          if key in enriched_by_key]
+                  excel_sheets(w, pd.DataFrame(rows), term[:31])
+          with pd.ExcelWriter(f'deliverables/jobs_{label}_strict.xlsx', engine='openpyxl') as w:
+              excel_sheets(w, strict_df, 'Strict_79_Roles')
+          write_csv(strict_df.to_dict(orient='records'), 'linkedin/linkedin_jobs/linkedin_jobs_strict.csv')
+          print(f'jobs_{label}.xlsx: all={len(all_df)}, strict={len(strict_df)}')
+          PYEOF
+
+      - name: Summarize checkpoints and unfinished work
+        if: always()
+        env:
+          ROLE_PLAN: ${{ needs.prepare.outputs.matrix }}
+          STATE_PLAN_RESULT: ${{ needs.scrape.result }}
+          MERGE_RESULT: ${{ steps.merge.outcome }}
+        run: |
+          python3 dashboard/linkedin/task_pipeline.py report --root scraped_data --output crawl_progress.json \
+            --jobs-csv "${{ steps.root.outputs.dir }}/linkedin/linkedin_jobs/linkedin_jobs_raw.csv"
+
+      - name: Preserve raw data and recovery information
+        if: always()
+        uses: actions/upload-artifact@v5
+        with:
+          name: linkedin-raw-and-checkpoints
+          retention-days: 30
+          path: |
+            ${{ steps.root.outputs.dir }}/linkedin/linkedin_jobs/linkedin_jobs_raw.csv
+            ${{ steps.root.outputs.dir }}/linkedin/linkedin_jobs/linkedin_jobs_all.csv
+            crawl_progress.json
+            scraped_data/**/*_state.json
+
+      - name: Upload deliverables
+        if: always()
+        uses: actions/upload-artifact@v5
+        with:
+          name: ${{ inputs.search_terms != '' && 'linkedin-jobs-procurement-keywords' || format('linkedin-jobs-{0}-{1}', env.ROLE_START, env.ROLE_END) }}
+          retention-days: 30
+          path: ${{ steps.root.outputs.dir }}/deliverables/*.xlsx
+
+  continue:
+    needs: deliver
+    if: always() && needs.deliver.result == 'success'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/download-artifact@v5
+        with:
+          name: linkedin-raw-and-checkpoints
+          path: progress_download
+      - name: Locate progress report
+        run: |
+          mkdir -p progress
+          find progress_download -name crawl_progress.json -exec cp {} progress/crawl_progress.json \;
+      - name: Continue unfinished work from this run
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python3 dashboard/linkedin/continue_run.py

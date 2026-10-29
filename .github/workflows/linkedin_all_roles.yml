@@ -1,0 +1,51 @@
+name: LinkedIn All 79 Roles
+
+on:
+  workflow_dispatch:
+    inputs:
+      auto_continue:
+        description: 'Automatically resume unfinished states/JDs; pauses after three attempts without progress'
+        type: boolean
+        default: true
+      previous_remaining:
+        description: 'Internal continuation progress counter; leave blank'
+        type: string
+        default: ''
+      continuation_stalls:
+        description: 'Internal continuation retry counter; leave blank'
+        type: string
+        default: ''
+      roles:
+        description: 'Blank runs all 79 catalog titles; otherwise comma-separated selection'
+        type: string
+        default: ''
+      post_time:
+        description: 'Publication window'
+        type: choice
+        default: week
+        options: [day, week, 3week, month, any]
+      shards:
+        description: 'Maximum simultaneous region runners'
+        type: choice
+        default: '8'
+        options: ['4', '8', '12', '16']
+      resume_run_id:
+        description: 'Earlier run whose jobs and unfinished cursors should be restored'
+        type: string
+        default: ''
+
+permissions:
+  contents: read
+  actions: write
+
+jobs:
+  scrape:
+    uses: ./.github/workflows/linkedin_roles_slice.yml
+    with:
+      role_start: 1
+      role_end: 79
+      roles: ${{ inputs.roles }}
+      post_time: ${{ inputs.post_time }}
+      shards: ${{ inputs.shards }}
+      state_split_mode: all
+      resume_run_id: ${{ inputs.resume_run_id }}

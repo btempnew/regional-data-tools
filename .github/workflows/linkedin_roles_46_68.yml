@@ -1,0 +1,62 @@
+name: LinkedIn Roles 45-79
+
+permissions:
+  contents: read
+  actions: write
+
+on:
+  workflow_dispatch:
+    inputs:
+      auto_continue:
+        description: 'Automatically resume unfinished states/JDs; pauses after three attempts without progress'
+        type: boolean
+        default: true
+      previous_remaining:
+        description: 'Internal continuation progress counter; leave blank'
+        type: string
+        default: ''
+      continuation_stalls:
+        description: 'Internal continuation retry counter; leave blank'
+        type: string
+        default: ''
+      resume_run_id:
+        description: "Continue an earlier run ID while preserving its saved jobs"
+        required: false
+        default: ""
+        type: string
+      state_split_mode:
+        description: "auto: split capped nationwide searches by US state; all: always search every US state"
+        required: false
+        default: all
+        type: choice
+        options: [all, auto]
+      post_time:
+        description: "How far back to look for jobs"
+        required: false
+        default: week
+        type: choice
+        options: [day, week, 3week, month, any]
+      roles:
+        description: "Comma-separated filters within roles 45-79; blank runs the whole range."
+        required: false
+        default: "Commodity Analyst, Senior Purchasing Agent, Senior Purchasing Specialist, Assistant Purchasing Agent, Purchasing Assistant, Senior Purchasing Analyst, Senior Purchasing Officer, Purchasing Coordinator, Associate Buyer, Senior Purchasing Assistant, Purchasing Supervisor, Purchase Specialist, Junior Buyer, Purchasing Officer, Senior Purchasing Manager, Purchasing Analyst, Purchasing Buyer, Materials Buyer, Assistant Buyer, Assistant Purchasing Manager, Purchasing Consultant, Purchasing Associate, Purchasing Agent, Director of Procurement, Procurement Analyst, Commodity Trader, Director of Purchasing, Category Buyer, Strategic Sourcing Analyst, Media Buyer, Commodity Broker, Sourcing Associate, Strategic Sourcing Lead, Sourcing Director, Global Sourcing Manager"
+        type: string
+      shards:
+        description: "Maximum simultaneous task runners"
+        required: false
+        default: "8"
+        type: choice
+        options: ["4", "8", "12", "16"]
+
+jobs:
+  scrape:
+    uses: ./.github/workflows/linkedin_roles_slice.yml
+    with:
+      resume_run_id: ${{ inputs.resume_run_id }}
+      role_start: 45
+      role_end: 79
+      state_split_mode: ${{ inputs.state_split_mode || 'all' }}
+      post_time: ${{ inputs.post_time || 'week' }}
+      roles: ${{ inputs.roles }}
+      shards: ${{ inputs.shards || '8' }}
+    secrets: inherit

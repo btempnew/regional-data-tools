@@ -1,0 +1,55 @@
+name: Role regions
+
+on:
+  workflow_call:
+    inputs:
+      role:
+        type: string
+        required: true
+      post_time:
+        type: string
+        required: true
+      resume_run_id:
+        type: string
+        default: ''
+      parallelism:
+        type: string
+        default: '8'
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  plan:
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.plan.outputs.matrix }}
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.11'
+      - id: plan
+        env:
+          ROLE: ${{ inputs.role }}
+        run: |
+          python3 dashboard/linkedin/task_pipeline.py plan --phase states --state-mode all --groups 51 --search-terms "$ROLE"
+
+  region:
+    needs: plan
+    runs-on: ubuntu-latest
+    timeout-minutes: 350
+    strategy:
+      fail-fast: false
+      max-parallel: ${{ inputs.parallelism == '16' && 8 || inputs.parallelism == '12' && 6 || inputs.parallelism == '8' && 4 || 2 }}
+      matrix: ${{ fromJSON(needs.plan.outputs.matrix) }}
+    name: ${{ inputs.role }} / ${{ matrix.locations[0] }}
+    steps:
+      - uses: actions/checkout@v5
+      - uses: ./.github/actions/linkedin-task
+        with:
+          task: ${{ toJSON(matrix) }}
+          post_time: ${{ inputs.post_time }}
+          resume_run_id: ${{ inputs.resume_run_id }}
+          github_token: ${{ github.token }}
