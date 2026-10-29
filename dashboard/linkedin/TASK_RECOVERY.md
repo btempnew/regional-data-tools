@@ -32,11 +32,11 @@ an earlier run in this repository. Relative publication windows move with time.
 Jobs deduplicate by LinkedIn posting ID, preserving different postings with the
 same title/employer/location. Thin updates cannot erase full descriptions.
 
-Each workflow exports an all-jobs workbook (All and Strict_79_Roles sheets) and
-a strict-only workbook. Strict matching compares the full title against all 79
+Each workflow exports exactly one combined workbook with All and Strict_79_Roles
+sheets. The full catalog run produces jobs_roles_1_to_79.xlsx; the keyword run
+produces jobs_keywords.xlsx. There is no separate strict-only workbook. Strict matching compares the full title against all 79
 catalog titles, normalizing Unicode, case and whitespace only. Extra suffixes,
-seniority changes, substrings and fuzzy matches do not qualify. Keyword membership
-tabs remain in the all-jobs keyword workbook. matched_catalog_role identifies
+seniority changes, substrings and fuzzy matches do not qualify. matched_catalog_role identifies
 which exact catalog title qualified each strict row.
 
 Excel text above 32,767 characters continues in additional _part_N columns;

@@ -343,12 +343,6 @@ jobs:
           with pd.ExcelWriter(f'deliverables/jobs_{label}.xlsx', engine='openpyxl') as w:
               excel_sheets(w, all_df, 'All')
               excel_sheets(w, strict_df, 'Strict_79_Roles')
-              for term in search_terms:
-                  rows = [enriched_by_key[key] for key in job_keys_by_search.get(term.casefold(), set())
-                          if key in enriched_by_key]
-                  excel_sheets(w, pd.DataFrame(rows), term[:31])
-          with pd.ExcelWriter(f'deliverables/jobs_{label}_strict.xlsx', engine='openpyxl') as w:
-              excel_sheets(w, strict_df, 'Strict_79_Roles')
           write_csv(strict_df.to_dict(orient='records'), 'linkedin/linkedin_jobs/linkedin_jobs_strict.csv')
           print(f'jobs_{label}.xlsx: all={len(all_df)}, strict={len(strict_df)}')
           PYEOF

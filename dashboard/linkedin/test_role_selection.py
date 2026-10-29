@@ -127,7 +127,13 @@ class RoleSelectionTests(unittest.TestCase):
         filters = workflow['on']['workflow_dispatch']['inputs']['roles']['default'].split(',')
         self.assertEqual(select_roles(roles, filters=filters, start_idx=45, end_idx=79), roles[44:])
 
-    def test_workflow_exports_one_all_sheet(self):
+    def test_role_workflow_exports_one_combined_workbook(self):
+        self._assert_combined_export('')
+
+    def test_keyword_workflow_exports_one_combined_workbook(self):
+        self._assert_combined_export('procurement,commodity,category,buyer,purchasing,Sourcing')
+
+    def _assert_combined_export(self, search_terms):
         from openpyxl import load_workbook
         workflow = (ROOT / '.github/workflows/linkedin_roles_slice.yml').read_text()
         # Execute the real merge/export code using saved-row fixtures, never a scraper.
@@ -162,14 +168,15 @@ class RoleSelectionTests(unittest.TestCase):
             cwd = Path.cwd()
             try:
                 with patch.dict(os.environ, {'GITHUB_WORKSPACE': str(root), 'SCRAPER_DIR': 'dashboard',
-                                             'ROLE_START': '1', 'ROLE_END': '23'}):
+                                             'ROLE_START': '1', 'ROLE_END': '23', 'SEARCH_TERMS': search_terms}):
                     with patch.object(sys, 'path', [str(ROOT / 'dashboard'), str(ROOT / 'dashboard/db'), *sys.path]):
                         exec(compile(code, 'workflow-merge', 'exec'), {})
             finally:
                 os.chdir(cwd)
             files = list((root / 'dashboard/deliverables').iterdir())
-            self.assertEqual({f.name for f in files}, {'jobs_roles_1_to_23.xlsx', 'jobs_roles_1_to_23_strict.xlsx'})
-            book = load_workbook(root / 'dashboard/deliverables/jobs_roles_1_to_23.xlsx', read_only=True)
+            filename = 'jobs_keywords.xlsx' if search_terms else 'jobs_roles_1_to_23.xlsx'
+            self.assertEqual([f.name for f in files], [filename])
+            book = load_workbook(root / 'dashboard/deliverables' / filename, read_only=True)
             self.assertEqual(book.sheetnames, ['All', 'Strict_79_Roles'])
             strict_rows = list(book['Strict_79_Roles'].values)
             self.assertEqual(len(strict_rows), 2)
