@@ -94,6 +94,15 @@ class PersistenceTests(unittest.TestCase):
         result = merge_record(row(100), {**row(100, 'Updated JD'), '_linkedin_detail_fetched': True})
         self.assertEqual(result['description'], 'Updated JD')
 
+    def test_merged_job_keeps_all_search_states_including_legacy_rows(self):
+        texas = {**row(100), 'search_location': 'Texas, United States'}
+        california = {**row(100), 'search_location': 'California, United States'}
+        result = merge_record(texas, california)
+        self.assertEqual(result['search_state'], 'California; Texas')
+        self.assertEqual(merge_record(result, texas)['search_state'], 'California; Texas')
+        self.assertEqual(merge_record(None, row(100))['search_state'], '')
+        self.assertEqual(merge_record(None, {**row(100), 'search_location': 'District of Columbia, United States'})['search_state'], 'District of Columbia')
+
     def test_resume_rejects_a_different_publication_window(self):
         store = TaskStore(self.root/'old', self.task, 'week')
         store.checkpoint('United States', [row(100)], {'next_offset': 50})

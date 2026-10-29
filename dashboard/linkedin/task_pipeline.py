@@ -11,6 +11,7 @@ from pathlib import Path
 import re
 import signal
 import time
+from functools import lru_cache
 
 from role_selection import select_roles
 
@@ -60,6 +61,20 @@ def posting_key(job):
     return str(job.get('id') or url or hashlib.sha256(json.dumps(job, sort_keys=True).encode()).hexdigest())
 
 
+@lru_cache(maxsize=1)
+def state_names():
+    return frozenset(literal(HERE/'linkedin_guest_search.py', 'US_STATES'))
+
+
+def search_states(record):
+    """Search provenance, never an inference about the employer's location."""
+    record = record or {}
+    names = str(record.get('search_state') or '').split(';')
+    location = str(record.get('search_location') or '')
+    names.append(location.removesuffix(', United States').strip())
+    return {name.strip() for name in names if name.strip() in state_names()}
+
+
 def merge_record(previous, incoming):
     """Keep the best details when a later listing-only checkpoint repeats a job."""
     value = dict(previous or {})
@@ -70,6 +85,7 @@ def merge_record(previous, incoming):
         if key == 'description' and not fetched and len(str(new)) < len(str(value.get(key) or '')):
             continue
         value[key] = new
+    value['search_state'] = '; '.join(sorted(search_states(previous) | search_states(incoming)))
     return value
 
 

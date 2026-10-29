@@ -43,3 +43,8 @@ Excel text above 32,767 characters continues in additional _part_N columns;
 rows beyond the sheet limit continue in numbered sheets. Raw CSV and journals
 keep full text. Artifacts request 30-day retention, subject to repository policy.
 No database import or deletion is performed.
+
+Exports include search_state: the US state(s) whose searches returned the posting.
+Merged postings retain all matching search states, separated by semicolons. This
+is search provenance, not the physical job location, which remains in location.
+Legacy rows are backfilled from search_location when available.
