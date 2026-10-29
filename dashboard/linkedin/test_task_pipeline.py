@@ -103,6 +103,21 @@ class PersistenceTests(unittest.TestCase):
         self.assertEqual(merge_record(None, row(100))['search_state'], '')
         self.assertEqual(merge_record(None, {**row(100), 'search_location': 'District of Columbia, United States'})['search_state'], 'District of Columbia')
 
+    def test_all_links_survive_csv_roundtrip_and_listing_fallback(self):
+        original = {**row(100), 'apply_url': 'https://jobs.example.com/100?x=a;b',
+                    'job_url_direct': 'https://ats.example.com/100'}
+        latest = {**row(100), 'apply_url': row(100)['job_url'],
+                  'application_url': 'https://careers.example.com/100'}
+        merged = merge_record(original, latest)
+        expected = {row(100)['job_url'], original['apply_url'], original['job_url_direct'], latest['application_url']}
+        self.assertEqual(set(merged['all_job_links'].splitlines()), expected)
+        self.assertEqual(merged['apply_url'], original['apply_url'])
+        store = TaskStore(self.root, self.task, 'week')
+        store.checkpoint('United States', [merged], {'done': True})
+        store.snapshot()
+        saved = next(read_records(store.csv_path))
+        self.assertEqual(set(merge_record(saved, latest)['all_job_links'].splitlines()), expected)
+
     def test_resume_rejects_a_different_publication_window(self):
         store = TaskStore(self.root/'old', self.task, 'week')
         store.checkpoint('United States', [row(100)], {'next_offset': 50})

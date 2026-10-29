@@ -48,3 +48,8 @@ Exports include search_state: the US state(s) whose searches returned the postin
 Merged postings retain all matching search states, separated by semicolons. This
 is search provenance, not the physical job location, which remains in location.
 Legacy rows are backfilled from search_location when available.
+
+all_job_links preserves every distinct observed job/application URL across merged
+records and resumed runs. Original URL fields remain; a discovered external
+apply_url is not replaced by a later LinkedIn listing fallback. This retains
+observed links; it does not invent application URLs that the source never supplied.

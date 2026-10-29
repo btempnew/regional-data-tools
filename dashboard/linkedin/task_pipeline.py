@@ -12,6 +12,7 @@ import re
 import signal
 import time
 from functools import lru_cache
+from urllib.parse import urlsplit
 
 from role_selection import select_roles
 
@@ -75,6 +76,26 @@ def search_states(record):
     return {name.strip() for name in names if name.strip() in state_names()}
 
 
+JOB_LINK_FIELDS = ('job_url', 'apply_url', 'job_url_direct', 'application_url',
+                   'direct_url', 'career_url', 'source_url', 'url')
+
+
+def job_links(record):
+    record = record or {}
+    values = str(record.get('all_job_links') or '').splitlines()
+    values += [record.get(field) for field in JOB_LINK_FIELDS]
+    return {value.strip() for value in values if isinstance(value, str)
+            and value.strip().startswith(('https://', 'http://'))}
+
+
+def linkedin_link(value):
+    try:
+        host = (urlsplit(str(value or '')).hostname or '').lower()
+    except ValueError:
+        return False
+    return host == 'linkedin.com' or host.endswith('.linkedin.com')
+
+
 def merge_record(previous, incoming):
     """Keep the best details when a later listing-only checkpoint repeats a job."""
     value = dict(previous or {})
@@ -86,6 +107,11 @@ def merge_record(previous, incoming):
             continue
         value[key] = new
     value['search_state'] = '; '.join(sorted(search_states(previous) | search_states(incoming)))
+    value['all_job_links'] = '\n'.join(sorted(job_links(previous) | job_links(incoming)))
+    # A later listing's LinkedIn fallback must not erase a discovered ATS URL.
+    old_apply = (previous or {}).get('apply_url')
+    if old_apply in job_links(previous) and not linkedin_link(old_apply) and linkedin_link(value.get('apply_url')):
+        value['apply_url'] = old_apply
     return value
 
 

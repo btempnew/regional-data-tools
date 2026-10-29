@@ -140,9 +140,9 @@ class RoleSelectionTests(unittest.TestCase):
             for shard, rows in enumerate(([
                 {'id': 'one', 'job_title': 'Senior Buyer', 'description': 'Salary: $90-110K per year. ' + 'x' * 70000,
                  'job_url': 'https://www.linkedin.com/jobs/view/4999999999', 'reposted': True,
-                 'reposted_source': 'linkedin_label', 'reposted_confidence': 'explicit', 'search_location': 'Texas, United States'},
+                 'reposted_source': 'linkedin_label', 'reposted_confidence': 'explicit', 'search_location': 'Texas, United States', 'apply_url': 'https://ats.example.com/100'},
             ], [
-                {'id': 'one', 'job_title': 'Senior Buyer', 'description': 'Duplicate row', 'job_url': 'https://www.linkedin.com/jobs/view/4999999999', 'search_location': 'California, United States'},
+                {'id': 'one', 'job_title': 'Senior Buyer', 'description': 'Duplicate row', 'job_url': 'https://www.linkedin.com/jobs/view/4999999999', 'search_location': 'California, United States', 'apply_url': 'https://careers.example.com/100'},
                 {'id': 'two', 'job_title': 'Manager', 'description': 'Manage sourcing.\nRequired: SQL.', 'job_url': 'https://example.com/2'},
             ]), 1):
                 folder = root / f'scraped_data/shard-{shard}'
@@ -184,6 +184,9 @@ class RoleSelectionTests(unittest.TestCase):
             self.assertEqual(by_id['two'][rows[0].index('repost_status')], 'Unknown')
             self.assertEqual(by_id['linkedin-4999999999'][rows[0].index('search_state')], 'California; Texas')
             self.assertEqual(strict_rows[1][strict_rows[0].index('search_state')], 'California; Texas')
+            for url in ['https://ats.example.com/100', 'https://careers.example.com/100', 'https://www.linkedin.com/jobs/view/4999999999']:
+                self.assertIn(url, by_id['linkedin-4999999999'][rows[0].index('all_job_links')])
+                self.assertIn(url, strict_rows[1][strict_rows[0].index('all_job_links')])
             full_description = ''.join(by_id['linkedin-4999999999'][rows[0].index(col)] or '' for col in ['description', 'description_part_2', 'description_part_3'])
             self.assertEqual(full_description, 'Salary: $90-110K per year. ' + 'x' * 70000)
             self.assertTrue(all(len(by_id['linkedin-4999999999'][rows[0].index(col)] or '') <= 32767 for col in ['description', 'description_part_2', 'description_part_3']))
