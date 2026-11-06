@@ -15,29 +15,70 @@ on:
       parallelism:
         type: string
         default: '8'
+      state_split_mode:
+        type: string
+        default: auto
 
 permissions:
   contents: read
   actions: read
 
 jobs:
-  plan:
+  national:
+    if: inputs.state_split_mode == 'auto'
     runs-on: ubuntu-latest
+    timeout-minutes: 350
+    name: ${{ inputs.role }} / United States
     outputs:
-      matrix: ${{ steps.plan.outputs.matrix }}
+      task_id: ${{ fromJSON(steps.task.outputs.matrix).include[0].id }}
     steps:
       - uses: actions/checkout@v5
       - uses: actions/setup-python@v6
         with:
           python-version: '3.11'
-      - id: plan
+      - id: task
         env:
           ROLE: ${{ inputs.role }}
         run: |
-          python3 dashboard/linkedin/task_pipeline.py plan --phase states --state-mode all --groups 51 --search-terms "$ROLE"
+          python3 dashboard/linkedin/task_pipeline.py plan --phase national --search-terms "$ROLE"
+      - uses: ./.github/actions/linkedin-task
+        with:
+          task: ${{ toJSON(fromJSON(steps.task.outputs.matrix).include[0]) }}
+          post_time: ${{ inputs.post_time }}
+          resume_run_id: ${{ inputs.resume_run_id }}
+          github_token: ${{ github.token }}
+
+  plan:
+    needs: national
+    # A failed nationwide search must still lead to the state searches.
+    if: always()
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.plan.outputs.matrix }}
+      has_tasks: ${{ steps.plan.outputs.has_tasks }}
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.11'
+      - name: Read the nationwide result
+        if: inputs.state_split_mode == 'auto'
+        continue-on-error: true
+        uses: actions/download-artifact@v5
+        with:
+          name: linkedin-task-${{ needs.national.outputs.task_id }}
+          path: national_result
+      - id: plan
+        env:
+          ROLE: ${{ inputs.role }}
+          MODE: ${{ inputs.state_split_mode }}
+        run: |
+          python3 dashboard/linkedin/task_pipeline.py plan --phase states --state-mode "$MODE" --previous national_result \
+            --groups 51 --search-terms "$ROLE"
 
   region:
     needs: plan
+    if: always() && needs.plan.result == 'success' && needs.plan.outputs.has_tasks == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 350
     strategy:

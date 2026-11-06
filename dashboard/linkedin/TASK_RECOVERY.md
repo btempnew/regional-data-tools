@@ -4,10 +4,16 @@ Run `LinkedIn All 79 Roles` for the complete catalog, or `LinkedIn Procurement
 Keywords` for the six broad queries. Buyer remains a keyword but is not one of
 79 strict titles. Optional range entries cover 1–23, 24–44 and 45–79.
 
-Each selected role starts directly with all 50 states and DC, using a reusable
-51-region matrix. One region per worker means a slow state cannot consume
-another state's runtime budget. Two roles advance concurrently; the runner
-setting bounds their combined concurrency. Keyword runs use four region workers.
+Each selected role first searches the whole United States. If that search sees
+the end of its results well short of LinkedIn's roughly 1,000-result limit (below
+offset 900), the role is finished. Otherwise, including when the search hit the
+limit, was refused or failed, the role continues with all 50 states and DC, using
+a reusable 51-region matrix. Set state_split_mode to all on a range or keyword
+workflow to skip the nationwide search and always run every state.
+
+One region per worker means a slow state cannot consume another state's runtime
+budget. Two roles advance concurrently; the runner setting bounds their combined
+concurrency. Keyword runs use four region workers.
 
 There is no local 1,000-result pagination cutoff: the next page is requested if
 LinkedIn continues serving data. LinkedIn can still refuse offsets near 1,000 or

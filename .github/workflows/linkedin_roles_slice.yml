@@ -32,7 +32,7 @@ on:
         default: ""
       state_split_mode:
         type: string
-        default: all
+        default: auto
       resume_run_id:
         type: string
         default: ""
@@ -70,9 +70,9 @@ on:
         default: ""
         type: string
       state_split_mode:
-        description: "auto: split capped nationwide searches by US state; all: always search every US state"
+        description: "auto: search nationwide first, split by US state only for searches reaching LinkedIn's limit; all: always search every US state"
         required: false
-        default: all
+        default: auto
         type: choice
         options: [all, auto]
       post_time:
@@ -80,7 +80,7 @@ on:
         required: false
         default: "week"
         type: choice
-        options: [day, week, 3week, month, any]
+        options: [day, week, 2week, 3week, month, any]
       roles:
         description: "Comma-separated filters within this role range; blank runs the whole range."
         required: false
@@ -103,7 +103,7 @@ jobs:
       - uses: actions/setup-python@v6
         with:
           python-version: '3.11'
-      - name: Plan selected roles (start directly with every state)
+      - name: Plan selected roles
         id: plan
         env:
           ROLE_FILTER: ${{ inputs.roles }}
@@ -125,6 +125,7 @@ jobs:
       post_time: ${{ inputs.post_time || 'week' }}
       resume_run_id: ${{ inputs.resume_run_id }}
       parallelism: ${{ inputs.shards || '8' }}
+      state_split_mode: ${{ inputs.state_split_mode || 'auto' }}
 
   # -- Merge shards, enrich JDs, build Excel ----------------------------------
   deliver:
@@ -357,6 +358,7 @@ jobs:
           ROLE_PLAN: ${{ needs.prepare.outputs.matrix }}
           STATE_PLAN_RESULT: ${{ needs.scrape.result }}
           MERGE_RESULT: ${{ steps.merge.outcome }}
+          STATE_SPLIT_MODE: ${{ inputs.state_split_mode || 'auto' }}
         run: |
           python3 dashboard/linkedin/task_pipeline.py report --root scraped_data --output crawl_progress.json \
             --jobs-csv "${{ steps.root.outputs.dir }}/linkedin/linkedin_jobs/linkedin_jobs_raw.csv"

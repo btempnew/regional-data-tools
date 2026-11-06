@@ -56,6 +56,35 @@ class MassiveRunTests(unittest.TestCase):
         self.assertEqual(len(progress['pending_regions']), 51)
         self.assertFalse(progress['complete'])
 
+    def run_report(self, states, mode='auto'):
+        roles = plan(['Sourcing'], 'national')
+        with tempfile.TemporaryDirectory() as tmp, patch.dict(os.environ, {'ROLE_PLAN': json.dumps({'include': roles}), 'STATE_SPLIT_MODE': mode}):
+            for index, state in enumerate(states):
+                (Path(tmp)/f'{index}_state.json').write_text(json.dumps(state))
+            target = Path(tmp)/'progress.json'
+            with patch('sys.argv', ['task_pipeline', 'report', '--root', tmp, '--output', str(target)]):
+                main()
+            return json.loads(target.read_text())
+
+    def national_state(self, **where):
+        task = plan(['Sourcing'], 'national')[0]
+        return {'task_id': task['id'], 'role': 'Sourcing', 'kind': 'national', 'expected_locations': task['locations'],
+                'complete': where.get('done', False), 'capped': where.get('capped', False), 'locations': {'United States': where}}
+
+    def test_auto_report_is_complete_when_the_nationwide_search_finished(self):
+        progress = self.run_report([self.national_state(done=True, reason='observed_end', next_offset=30)])
+        self.assertEqual(progress['pending_regions'], [])
+        self.assertTrue(progress['complete'])
+
+    def test_auto_report_expects_states_after_a_capped_nationwide_search(self):
+        progress = self.run_report([self.national_state(done=True, capped=True, reason='cap', next_offset=1000)])
+        self.assertEqual(len(progress['pending_regions']), 51)
+        self.assertEqual(progress['capped_regions'], [])
+        self.assertNotIn('United States', [item['location'] for item in progress['pending_regions']])
+
+    def test_auto_report_expects_the_nationwide_search_before_it_runs(self):
+        self.assertEqual(len(self.run_report([])['pending_regions']), 51)
+
 
 if __name__ == '__main__':
     unittest.main()

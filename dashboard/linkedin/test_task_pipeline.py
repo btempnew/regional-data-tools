@@ -32,12 +32,21 @@ class PlanningTests(unittest.TestCase):
                 self.assertLessEqual(max(len(t['locations']) for t in expanded), 11)
 
     def test_auto_expands_capped_pending_and_missing_tasks(self):
-        manifests = [dict(role='Buyer', kind='national', complete=True, capped=False),
+        finished = {'United States': {'reason': 'observed_end', 'next_offset': 340, 'done': True}}
+        manifests = [dict(role='Buyer', kind='national', complete=True, capped=False, locations=finished),
                      dict(role='Purchasing', kind='national', complete=True, capped=True),
                      dict(role='Sourcing', kind='national', complete=False, capped=False)]
         tasks = plan(['Buyer', 'Purchasing', 'Sourcing', 'Procurement'], 'states', manifests=manifests)
         self.assertEqual({t['role'] for t in tasks}, {'Purchasing', 'Sourcing', 'Procurement'})
         self.assertEqual(len(tasks), 15)
+
+    def test_auto_expands_searches_ending_near_the_limit_or_without_a_seen_end(self):
+        def national(**where):
+            return dict(role='Buyer', kind='national', complete=True, capped=False, locations={'United States': where})
+        for where in [dict(reason='observed_end', next_offset=950), dict(reason='observed_end'),
+                      dict(reason='request_failed', next_offset=20), {}]:
+            self.assertEqual(len(plan(['Buyer'], 'states', manifests=[national(**where)])), 5, where)
+        self.assertEqual(plan(['Buyer'], 'states', manifests=[national(reason='observed_end', next_offset=20)]), [])
 
 
 class PersistenceTests(unittest.TestCase):

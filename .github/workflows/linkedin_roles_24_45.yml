@@ -29,9 +29,9 @@ on:
         default: ""
         type: string
       state_split_mode:
-        description: "auto: split capped nationwide searches by US state; all: always search every US state"
+        description: "auto: search nationwide first, split by US state only for searches reaching LinkedIn's limit; all: always search every US state"
         required: false
-        default: all
+        default: auto
         type: choice
         options: [all, auto]
       post_time:
@@ -39,7 +39,7 @@ on:
         required: false
         default: week
         type: choice
-        options: [day, week, 3week, month, any]
+        options: [day, week, 2week, 3week, month, any]
       roles:
         description: "Comma-separated filters within roles 24-44; blank runs the whole range."
         required: false
@@ -59,7 +59,7 @@ jobs:
       resume_run_id: ${{ inputs.resume_run_id }}
       role_start: 24
       role_end: 44
-      state_split_mode: ${{ inputs.state_split_mode || 'all' }}
+      state_split_mode: ${{ inputs.state_split_mode || 'auto' }}
       post_time: ${{ inputs.post_time || 'week' }}
       roles: ${{ inputs.roles }}
       shards: ${{ inputs.shards || '8' }}

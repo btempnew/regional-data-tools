@@ -98,7 +98,7 @@ class RoleSelectionTests(unittest.TestCase):
         inputs = procurement['on']['workflow_dispatch']['inputs']
         self.assertEqual(inputs['roles']['default'].split(','),
                          ['procurement', 'commodity', 'category', 'buyer', 'purchasing', 'Sourcing'])
-        self.assertEqual(inputs['state_split_mode']['default'], 'all')
+        self.assertEqual(inputs['state_split_mode']['default'], 'auto')
         self.assertIn('inputs.roles', procurement['jobs']['scrape']['with']['search_terms'])
         self.assertNotIn('state_split_terms', procurement['jobs']['scrape']['with'])
         for name in ['linkedin_roles_slice.yml', 'linkedin_roles_24_45.yml', 'linkedin_roles_46_68.yml']:
@@ -110,6 +110,11 @@ class RoleSelectionTests(unittest.TestCase):
         shared = workflow('linkedin_roles_slice.yml')
         self.assertIn('state_split_mode', shared['on']['workflow_call']['inputs'])
         self.assertIn('linkedin_role_regions.yml', shared['jobs']['scrape']['uses'])
+        self.assertIn('inputs.state_split_mode', shared['jobs']['scrape']['with']['state_split_mode'])
+        regions = workflow('linkedin_role_regions.yml')
+        self.assertEqual(regions['jobs']['plan']['needs'], 'national')
+        self.assertIn("needs.plan.outputs.has_tasks == 'true'", regions['jobs']['region']['if'])
+        self.assertEqual(workflow('linkedin_all_roles.yml')['jobs']['scrape']['with']['state_split_mode'], 'auto')
         self.assertEqual(shared['jobs']['scrape']['strategy']['max-parallel'], '2')
 
     def test_screenshot_additions_are_unique_and_in_the_last_workflow(self):

@@ -27,7 +27,7 @@ on:
         description: 'Publication window'
         type: choice
         default: week
-        options: [day, week, 3week, month, any]
+        options: [day, week, 2week, 3week, month, any]
       shards:
         description: 'Maximum simultaneous region runners'
         type: choice
@@ -51,5 +51,5 @@ jobs:
       roles: ${{ inputs.roles }}
       post_time: ${{ inputs.post_time }}
       shards: ${{ inputs.shards }}
-      state_split_mode: all
+      state_split_mode: auto
       resume_run_id: ${{ inputs.resume_run_id }}

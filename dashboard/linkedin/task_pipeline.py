@@ -33,6 +33,14 @@ def task_id(role, phase, group=0):
     return f'{phase}-{digest}-{group}'
 
 
+def covered_nationally(summary):
+    """True only when a nationwide search saw the end of its results well short of LinkedIn's limit."""
+    where = (summary.get('locations') or {}).get('United States') or {}
+    near_cap = literal(HERE/'linkedin_guest_search.py', 'LIMIT') - 100
+    return bool(summary.get('complete') and not summary.get('capped') and where.get('reason') == 'observed_end'
+                and where.get('next_offset', near_cap) < near_cap)
+
+
 def plan(roles, phase, mode='auto', manifests=(), groups=5):
     states = literal(HERE/'linkedin_guest_search.py', 'US_STATES')
     summaries = {m['role'].casefold(): m for m in manifests if m.get('kind') == 'national'}
@@ -43,7 +51,7 @@ def plan(roles, phase, mode='auto', manifests=(), groups=5):
             continue
         previous = summaries.get(role.casefold())
         # A missing/failed national task must never prevent geographic expansion.
-        if mode == 'auto' and previous and previous.get('complete') and not previous.get('capped'):
+        if mode == 'auto' and previous and covered_nationally(previous):
             continue
         for group in range(groups):
             selected = select_roles(states, shard=f'{group+1}/{groups}')
@@ -302,17 +310,25 @@ def crawl(task, post_time, output, resume=None, minutes=330):
     return 3 if pending or capped or missing else 0
 
 
-def report(root, destination, expected=(), jobs_csv=None):
+def saved_states(root):
     states = {}
     for path in sorted(Path(root).rglob('*_state.json'), key=lambda p: ('previous' not in p.parts, str(p))):
         value = json.loads(path.read_text())
         if value.get('task_id'): states[value['task_id']] = value
+    return states
+
+
+def report(root, destination, expected=(), jobs_csv=None):
+    states = saved_states(root)
     for task in expected:
         states.setdefault(task['id'], {'task_id': task['id'], 'role': task['role'], 'kind': task['kind'],
             'expected_locations': task['locations'], 'locations': {}, 'missing_task_artifact': True})
     pending, capped, missing_details = [], [], 0
+    split_roles = {value['role'].casefold() for value in states.values() if value.get('kind') != 'national'}
     for value in states.values():
         missing_details += value.get('missing_descriptions', 0)
+        # The state searches replace a nationwide search that hit the limit or did not finish.
+        if value.get('kind') == 'national' and value['role'].casefold() in split_roles: continue
         for location in value.get('expected_locations', []):
             status = value.get('locations', {}).get(location, {})
             record = {'task_id': value['task_id'], 'role': value['role'], 'location': location,
@@ -377,9 +393,12 @@ def main():
         raise SystemExit(crawl(json.loads(args.task_json), args.post_time, args.output, args.resume, args.minutes))
     if args.command == 'report':
         expected = []
+        mode = os.getenv('STATE_SPLIT_MODE') or 'all'
+        manifests = list(saved_states(args.root).values())
         for role in json.loads(os.getenv('ROLE_PLAN') or '{}').get('include', []):
             if role.get('role'):
-                expected += plan([role['role']], 'states', mode='all', groups=51)
+                expected += plan([role['role']], 'states', mode=mode, manifests=manifests, groups=51)
+                if mode == 'auto': expected += plan([role['role']], 'national')
         for key in ['NATIONAL_PLAN', 'STATE_PLAN']:
             expected += json.loads(os.getenv(key) or '{}').get('include', [])
         report(args.root, args.output, [t for t in expected if t.get('role')], args.jobs_csv)
